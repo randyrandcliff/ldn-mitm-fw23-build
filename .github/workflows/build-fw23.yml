@@ -45,6 +45,14 @@ jobs:
       - name: Build
         run: make -j4
 
+      - name: Preserve compiled SD files
+        uses: actions/upload-artifact@v4
+        with:
+          name: ldn_mitm-fw23-sd-files
+          path: out/sd
+          include-hidden-files: true
+          if-no-files-found: error
+
       - name: Verify and package
         run: |
           test -s out/sd/atmosphere/contents/4200000000000010/exefs.nsp
@@ -56,8 +64,8 @@ jobs:
             git rev-parse HEAD
             git -C Atmosphere-libs rev-parse HEAD
             git -C libtesla rev-parse HEAD
-            aarch64-none-elf-g++ --version
-            dkp-pacman -Q
+            "$DEVKITPRO/devkitA64/bin/aarch64-none-elf-g++" --version
+            if command -v dkp-pacman >/dev/null; then dkp-pacman -Q; fi
             if [ -d /tmp/ldn-libnx ]; then git -C /tmp/ldn-libnx rev-parse HEAD; fi
           } > out/BUILD-INFO.txt
           python3 - <<'PY'
