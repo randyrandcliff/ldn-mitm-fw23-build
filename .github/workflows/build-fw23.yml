@@ -1,0 +1,86 @@
+name: Build ldn_mitm firmware 23 candidate
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/build-fw23.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: devkitpro/devkita64:latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: Lusamine/ldn_mitm
+          ref: dfda3c4981b92f835d7a5cf7600754ca0e482990
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Select firmware 23 libraries
+        run: |
+          git -C Atmosphere-libs fetch origin aae2da0155a490abd3bfd17a70ccd16bb73c916a
+          git -C Atmosphere-libs checkout --detach aae2da0155a490abd3bfd17a70ccd16bb73c916a
+          test "$(git -C Atmosphere-libs rev-parse HEAD)" = aae2da0155a490abd3bfd17a70ccd16bb73c916a
+
+      - name: Build
+        id: build
+        continue-on-error: true
+        run: make -j2
+
+      - name: Build with current libnx if packaged libnx is insufficient
+        if: steps.build.outcome == 'failure'
+        run: |
+          git clone https://github.com/switchbrew/libnx.git /tmp/ldn-libnx
+          git -C /tmp/ldn-libnx checkout --detach 146c3d1446d35546943c7b6cfcd479bc1f5e9b67
+          make -C /tmp/ldn-libnx -j2
+          make -C /tmp/ldn-libnx install
+          # Clean each component directly; the top-level clean target also packs.
+          for component in Atmosphere-libs/libstratosphere ldn_mitm ldnmitm_config overlay; do
+            make -C "$component" clean
+          done
+          make -j2
+
+      - name: Verify and package
+        run: |
+          test -s out/sd/atmosphere/contents/4200000000000010/exefs.nsp
+          test -f out/sd/atmosphere/contents/4200000000000010/flags/boot2.flag
+          test -s out/sd/switch/ldnmitm_config/ldnmitm_config.nro
+          test -s out/sd/switch/.overlays/ldnmitm_config.ovl
+          {
+            echo 'Unverified firmware 23.0.0 test candidate; console testing required.'
+            git rev-parse HEAD
+            git -C Atmosphere-libs rev-parse HEAD
+            git -C libtesla rev-parse HEAD
+            aarch64-none-elf-g++ --version
+            dkp-pacman -Q
+            if [ -d /tmp/ldn-libnx ]; then git -C /tmp/ldn-libnx rev-parse HEAD; fi
+          } > out/BUILD-INFO.txt
+          (cd out/sd && zip -r ../ldn_mitm-fw23-test.zip atmosphere switch)
+          sha256sum out/ldn_mitm-fw23-test.zip > out/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ldn_mitm-fw23-test
+          if-no-files-found: error
+          path: |
+            out/ldn_mitm-fw23-test.zip
+            out/BUILD-INFO.txt
+            out/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ldn_mitm-fw23-debug
+          if-no-files-found: error
+          path: |
+            ldn_mitm/ldn_mitm.elf
+            overlay/overlay.elf
